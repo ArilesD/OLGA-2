@@ -1,0 +1,27 @@
+# Clé de service Firebase du backend — fournie au runtime via un volume
+# monté en lecture seule depuis ./firebase/apiKey.json. Ne JAMAIS versionner.
+firebase/apiKey.json
+
+# Fichiers d'environnement locaux (contiennent des secrets)
+# NB: .env.example est versionné (modèle sans secret), .env est ignoré.
+.env
+!.env.example
+
+# Artefacts de build locaux
+Build/
+out/
+*.log
+*.tmp
+
+# Artéfacts Gradle de l'Orchestrator
+Orchestrator/.gradle/
+Orchestrator/build/
+Orchestrator/app/build/
+Orchestrator/app/bin/
+Orchestrator/.kotlin/
+
+# IDE
+.idea/
+*.iml
+.vscode/
+.DS_Store

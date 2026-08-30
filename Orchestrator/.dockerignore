@@ -1,0 +1,13 @@
+# Fichiers de build locaux
+.gradle
+build
+app/build
+app/bin
+out
+
+# Fichiers IDE et temporaires
+*.iml
+.idea/
+*.log
+*.tmp
+.DS_Store

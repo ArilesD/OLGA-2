@@ -1,0 +1,115 @@
+services:
+  # -----------------------------------------------------------
+  # Base de données MySQL utilisée par le backend Olga
+  # (utilisateurs, rôles, taxons...). Non exposée sur l'hôte.
+  # -----------------------------------------------------------
+  db:
+    image: mysql:8.1
+    container_name: olga-db
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-rootpassword}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-olga}
+    volumes:
+      - olga_data:/var/lib/mysql
+    networks:
+      - olga
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-p${MYSQL_ROOT_PASSWORD:-rootpassword}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 15s
+
+  # -----------------------------------------------------------
+  # Backend Olga (API interne). Récupéré sous forme d'IMAGE Docker
+  # publique (GHCR), jamais depuis le code source. Accessible
+  # UNIQUEMENT depuis le réseau interne (par le service orchestrator).
+  # Aucun port n'est publié vers l'hôte.
+  #
+  # La clé de service Firebase n'est PAS dans l'image : elle est montée
+  # en lecture seule depuis ./firebase/apiKey.json au chemin attendu.
+  # -----------------------------------------------------------
+  backend:
+    image: ${BACKEND_IMAGE:-ghcr.io/nexus-ai-innovation-lab/olga-backend:1.0.0}
+    container_name: olga-backend
+    restart: unless-stopped
+    environment:
+      ADDRESS: 0.0.0.0
+      PORT: 9091
+      MYSQL_URL: jdbc:mysql://db:3306/olga?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
+      MYSQL_USERNAME: root
+      MYSQL_PASSWORD: ${MYSQL_ROOT_PASSWORD:-rootpassword}
+      FIREBASE_KEY_PATH: /app/config/apiKey.json
+    volumes:
+      - ./firebase/apiKey.json:/app/config/apiKey.json:ro
+    expose:
+      - "9091"
+    networks:
+      - olga
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "-s", "http://localhost:9091/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 40s
+
+  # -----------------------------------------------------------
+  # Orchestrator — point d'entrée public des développeurs.
+  # Seul ce service est exposé sur l'hôte (port 9092). Il
+  # communique avec le backend via le réseau interne.
+  # -----------------------------------------------------------
+  orchestrator:
+    build:
+      context: ./Orchestrator
+      dockerfile: Dockerfile
+    container_name: olga-orchestrator
+    restart: unless-stopped
+    environment:
+      SERVER_PORT: 9092
+      OLGA_BACKEND_BASE_URL: http://backend:9091
+    ports:
+      - "${ORCHESTRATOR_PORT:-9092}:9092"
+    networks:
+      - olga
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "-s", "http://localhost:9092/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  # -----------------------------------------------------------
+  # phpMyAdmin (outil de dev facultatif).
+  # Démarrer avec : docker compose --profile tools up -d
+  # -----------------------------------------------------------
+  phpmyadmin:
+    image: phpmyadmin/phpmyadmin
+    container_name: olga-phpmyadmin
+    profiles: ["tools"]
+    restart: unless-stopped
+    environment:
+      PMA_HOST: db
+      PMA_PORT: 3306
+      PMA_USER: root
+      PMA_PASSWORD: ${MYSQL_ROOT_PASSWORD:-rootpassword}
+    ports:
+      - "8081:80"
+    networks:
+      - olga
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  olga_data:
+
+networks:
+  olga:
+    driver: bridge
