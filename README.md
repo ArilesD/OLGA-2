@@ -36,16 +36,32 @@ Concrètement, vous pouvez :
 
 ### 2.2 Préparer la clé Firebase
 
-Le backend s'appuie sur Firestore (Firebase) pour certaines données métier. La clé de service Firebase est obligatoire, mais elle n'est **jamais** stockée dans ce repository : elle est montée dans le conteneur au démarrage.
+Le backend s'appuie sur Firestore (Firebase) pour une partie de ses données métier. Pour fonctionner, il doit disposer de sa **clé de compte de service Firebase** (le fichier JSON de type *service account*). Ce fichier est le seul élément de configuration à obtenir en dehors de Git : il n'est **jamais** stocké dans ce repository.
 
-1. Obtenez la clé (fichier JSON de type *service account*) auprès de votre équipe ou de l'administrateur du projet.
-2. Créez un dossier `firebase/` à la racine et placez-y la clé en la nommant exactement **`apiKey.json`** :
+#### Où récupérer la clé
+
+Si la clé ne vous a pas déjà été fournie par votre équipe, générez-la depuis la console Firebase de votre projet :
+
+1. Dans Firebase, ouvrez **Paramètres → Comptes de service**.
+2. Cliquez sur **Générer une clé privée**.
+3. Un fichier JSON correspondant à votre compte de service est téléchargé.
+
+#### Où placer la clé
+
+1. Créez un dossier `firebase/` à la racine du projet.
+2. Déposez-y le fichier téléchargé en le nommant exactement **`apiKey.json`** :
 
 ```
 firebase/apiKey.json
 ```
 
-Ce fichier est ignoré par Git (`firebase/apiKey.json`) : il ne doit jamais être versionné. Sans lui, le backend ne démarre pas correctement.
+C'est le seul fichier à préparer, rien d'autre n'est requis pour le backend.
+
+> **Important** : ce fichier contient une clé privée et ne doit **jamais** être ajouté à Git. Il est déjà ignoré dans le `.gitignore` (`firebase/apiKey.json`). Un `git status` ne doit jamais montrer ce fichier.
+>
+> Au démarrage, Docker transmet ce fichier au backend (monté en lecture seule), qui l'utilise pour s'authentifier auprès de Firestore. Vous n'avez pas d'autre manipulation à faire. Sans ce fichier, le backend ne démarre pas correctement.
+
+> **Documentation complémentaire** : la génération d'une clé de service est également détaillée dans le dépôt de référence : [olga-designer-admin-backend](https://github.com/NEXUS-AI-Innovation-lab/olga-designer-admin-backend). Le README ci-dessus reste autonome : ces étapes suffisent pour démarrer.
 
 ### 2.3 Lancer le projet
 
