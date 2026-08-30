@@ -1,173 +1,125 @@
-# OLGA — Workflows & Orchestrator
+# OLGA — API des workflows d'inventaire
 
-OLGA est un système de collecte de données sur le terrain (inventaires de biodiversité) utilisé pour le suivi écologique. Ce repository vous permet d'utiliser **Orchestrator**, la passerelle REST qui expose l'API des workflows, et de la connecter au **backend** qui exécute réellement le travail.
+OLGA est un système de collecte de données sur le terrain (inventaires de biodiversité, surveillance écologique). Il modélise les saisies sous forme de **workflows** : des graphes de formulaires que les utilisateurs remplissent étape par étape.
 
-Le backend (OLGA MultiServices + Workflows) n'est **pas distribué en code source** : il est fourni sous forme d'**image Docker** publiée sur GitHub Container Registry (GHCR) et tirée automatiquement au démarrage. Votre repository contient uniquement l'Orchestrator (le code source que vous utilisez et adaptez) et la configuration d'orchestration.
+**Orchestrator** est la passerelle HTTP qui vous donne accès à l'API OLGA. Vous l'appelez depuis vos propres outils (page web, script, application) pour créer et gérer les workflows, définir les formulaires de saisie et piloter les exécutions.
 
-```
-Développeur
-     │   requêtes HTTP
-     ▼
- Orchestrator  (:9092)   ← code source présent dans ce repository
-     │   communication interne (réseau Docker)
-     ▼
-   Backend  (:9091)      ← image Docker tirée de GHCR, pas de code source
-```
-
-Ce que vous pouvez faire avec Orchestrator :
-
-- **Créer et modifier des workflows** : un workflow est un graphe de nœuds (`start`, `form`, `save`, `end`) reliés par des arêtes, avec versioning.
-- **Gérer des formulaires** : les formulaires définissent les champs de saisie associés aux nœuds d'un workflow.
-- **Exécuter des workflows** : démarrer une tâche sur un inventaire, remplir les formulaires étape par étape, suivre et reprendre des tâches.
+> Le backend qui exécute réellement le travail est fourni tout prêt, sous forme d'image Docker. Vous n'avez pas à le construire : Orchestrator y est connecté automatiquement au démarrage. La documentation ci-dessous ne suppose aucune connaissance de l'architecture interne.
 
 ---
 
-## 1. L'API
+## 1. Présentation de l'API
 
-Orchestrator expose trois familles d'endpoints, toutes en JSON :
+L'API repose sur trois notions complémentaires :
 
-| Famille | Base | Rôle |
-|---|---|---|
-| Workflows | `/workflows` | Lire, charger, sauvegarder, versionner les workflows |
-| Formulaires | `/forms` | CRUD des formulaires |
-| Exécution | `/execute` | Démarrer et suivre l'exécution des workflows |
+- **Workflows** — Un workflow est un graphe de nœuds (`start`, `form`, `save`, `end`) reliés par des arêtes. Il décrit le déroulement d'une collecte : chaque `form` est une étape de saisie, `save` déclenche la persistance. Les workflows sont versionnés : vous pouvez consulter l'historique et restaurer une version précédente.
 
-La **documentation interactive complète** (OpenAPI / Swagger) est disponible une fois le projet démarré :
+- **Formulaires** — Un formulaire définit les champs d'une étape de saisie (`field_key`, `field_label`, `field_type`, etc.). Les formulaires sont réutilisables et associés aux nœuds des workflows.
 
-```
-http://localhost:9092/swagger-ui.html
-```
+- **Exécutions** — Lancer un workflow sur un inventaire crée une **tâche** : le système remplit progressivement les formulaires, soumet les données et avance dans le graphe jusqu'à la fin.
 
-Vous y trouverez chaque endpoint, ses paramètres, ses exemples de requêtes et de réponses.
+Concrètement, vous pouvez :
 
----
-
-## 2. Prérequis
-
-- **Docker** (Desktop sur Windows/Mac, ou le moteur Docker + Compose v2 sur Linux).
-- **La clé de service Firebase** du backend (voir la section 4).
-- Aucune connaissance du fonctionnement interne du backend n'est nécessaire.
+- créer, charger, modifier et versionner des workflows ;
+- gérer vos formulaires (création, lecture, mise à jour, suppression) ;
+- lister les inventaires accessibles à un utilisateur et les tâches en cours ;
+- démarrer une collecte, soumettre chaque formulaire et reprendre une tâche là où elle s'est arrêtée.
 
 ---
 
-## 3. Récupérer le projet
+## 2. Démarrage rapide
 
-Clonez ce repository :
+### 2.1 Prérequis
 
-```bash
-git clone <url-du-repository> && cd <dossier>
-```
+- **Docker** (avec Docker Compose v2) sur votre machine.
+- **La clé de service Firebase** du backend (voir 2.2). C'est le seul fichier de configuration à obtenir, en dehors de Git.
 
-Le repository contient :
+### 2.2 Préparer la clé Firebase
 
-```
-.
-├── compose.yaml          ← orchestration Docker (backend image + orchestrator)
-├── Orchestrator/         ← code source de la passerelle (édition, execution)
-├── README.md
-└── .env.example          ← modèle de configuration
-```
+Le backend s'appuie sur Firestore (Firebase) pour certaines données métier. La clé de service Firebase est obligatoire, mais elle n'est **jamais** stockée dans ce repository : elle est montée dans le conteneur au démarrage.
 
-Le dossier `Backend-2/` n'y figure **pas** : le backend est récupéré automatiquement sous forme d'image Docker, pas de code source.
-
----
-
-## 4. Préparer la clé Firebase
-
-Le backend utilise Firestore (Firebase) pour ses besoins métier. La clé de service Firebase est **obligatoire**, mais elle n'est **jamais** intégrée à l'image ni au repository : elle est montée dans le conteneur au démarrage.
-
-> **Où trouver la clé ?** La clé de service Firebase (fichier JSON de type "service account") est fournie par votre équipe / le mainteneur du backend. Elle est délivrée en dehors du Git et ne doit pas circuler par ce canal. Si vous ne l'avez pas, demandez-la à l'administrateur du projet avant de continuer.
-
-**Étape 1 — Où la placer :** créez un dossier `firebase/` à la racine du projet :
-
-```
-firebase/
-```
-
-**Étape 2 — Le nom du fichier :** déposez la clé en la nommant exactement **`apiKey.json`** :
+1. Obtenez la clé (fichier JSON de type *service account*) auprès de votre équipe ou de l'administrateur du projet.
+2. Créez un dossier `firebase/` à la racine et placez-y la clé en la nommant exactement **`apiKey.json`** :
 
 ```
 firebase/apiKey.json
 ```
 
-**Étape 3 — Comment Docker la monte :** au démarrage, le `compose.yaml` monte ce fichier **en lecture seule** dans le conteneur du backend, au chemin attendu par l'application :
+Ce fichier est ignoré par Git (`firebase/apiKey.json`) : il ne doit jamais être versionné. Sans lui, le backend ne démarre pas correctement.
 
-```yaml
-volumes:
-  - ./firebase/apiKey.json:/app/config/apiKey.json:ro
-```
+### 2.3 Lancer le projet
 
-L'application (via la variable `FIREBASE_KEY_PATH=/app/config/apiKey.json`) lit la clé à cet endroit au lancement.
-
-**Si le fichier est absent :** le backend ne pourra pas initialiser Firestore et **ne démarrera pas correctement** (il échouera ou restera en panne du point de vue des healthchecks). Vérifiez donc que `firebase/apiKey.json` existe et est valide avant de lancer.
-
-> Ce fichier est listé dans le `.gitignore` (`firebase/apiKey.json`) : il ne doit jamais être versionné.
-
----
-
-## 5. Démarrer l'ensemble
-
-Depuis la racine du projet :
+Depuis la racine du repository :
 
 ```bash
-docker compose up --build
+docker compose up --build -d
 ```
 
-> `-d` pour lancer en arrière-plan : `docker compose up --build -d`.
-> `--profile tools` pour démarrer aussi phpMyAdmin (outil de dev facultatif) : `docker compose up --build --profile tools`.
-
-Au premier lancement, Docker **tire l'image du backend** depuis GHCR (`ghcr.io/nexus-ai-innovation-lab/olga-backend:1.0.0`) et **construit l'Orchestrator** depuis le code source local. C'est automatique, il n'y a rien d'autre à faire.
-
-### Vérifier que tout est prêt
+Au premier lancement, Docker télécharge l'image du backend et construit Orchestrator : c'est automatique. Pour suivre le démarrage et vérifier que tout est prêt :
 
 ```bash
 docker compose ps
 ```
 
-Les trois services doivent être `healthy` :
+Vous devez voir les trois services au statut `healthy` : `olga-db`, `olga-backend` et `olga-orchestrator`.
 
-- `olga-db` — MySQL
-- `olga-backend` — le backend (image GHCR)
-- `olga-orchestrator` — la passerelle publique
+### 2.4 Vérifier que l'API répond
 
----
+```bash
+curl http://localhost:9092/health
+```
 
-## 6. Accéder à l'API
+Réponse attendue :
 
-| Ressource | Adresse |
-|---|---|
-| API Orchestrator | `http://localhost:9092` |
-| Swagger UI | `http://localhost:9092/swagger-ui.html` |
-| Healthcheck | `http://localhost:9092/health` |
-| phpMyAdmin (profil `tools`) | `http://localhost:8081` |
+```json
+{"status":"UP"}
+```
 
-Seul le port **9092** (Orchestrator) est exposé sur votre machine. Le backend (9091) et MySQL (3306) restent sur le réseau Docker interne : ils ne sont pas accessibles depuis l'extérieur.
+Vous êtes prêt. Passez à la section suivante pour découvrir l'API.
 
 ---
 
-## 7. Utiliser les principaux endpoints
+## 3. Utiliser l'API
 
-Toutes les requêtes sont en JSON.
+### 3.1 URL de base et documentation
 
-### Lister les workflows
+L'API est accessible une fois le projet démarré à l'adresse :
+
+```
+http://localhost:9092
+```
+
+La **documentation de référence** de tous les endpoints (paramètres, formats, exemples de requêtes et de réponses) est consultable dans l'interface Swagger :
+
+```
+http://localhost:9092/swagger-ui.html
+```
+
+> Considérez Swagger comme la source de vérité : chaque endpoint y est détaillé. Le README vous donne l'essentiel pour démarrer ; pour les aspects précis (formats exacts, champs facultatifs), ouvrez Swagger.
+
+### 3.2 Les grandes familles d'API
+
+| Famille | Base | Rôle |
+|---|---|---|
+| Workflows | `/workflows` | Lire, créer, sauvegarder et versionner les workflows |
+| Forms | `/forms` | Gérer les formulaires (CRUD) |
+| Execute | `/execute` | Piloter l'exécution des workflows (tâches) |
+
+### 3.3 Premiers pas
+
+**Lister les workflows :**
 
 ```bash
 curl http://localhost:9092/workflows
 ```
 
-```json
-[
-  { "workflow_id": "wf_abc123", "workflow_label": "Mon Workflow", "from_web": true, "last_updated": "..." }
-]
-```
-
-### Charger un workflow complet
+**Charger un workflow complet (nœuds et arêtes) :**
 
 ```bash
 curl http://localhost:9092/workflows/wf_abc123
 ```
 
-### Sauvegarder un workflow
+**Sauvegarder un workflow :** le corps doit contenir un champ `workflow` (le backend crée une version avant d'écraser) :
 
 ```bash
 curl -X PUT http://localhost:9092/workflows/wf_abc123 \
@@ -185,85 +137,133 @@ curl -X PUT http://localhost:9092/workflows/wf_abc123 \
       }'
 ```
 
-### Exécuter un workflow
+**Explorer une exécution :** le cycle typique est : lister les inventaires accessibles, démarrer une tâche, puis soumettre les formulaires l'un après l'autre.
 
 ```bash
+# Inventaires accessibles à un utilisateur (avec l'info "canStart")
 curl "http://localhost:9092/execute/inventories?email=user@example.com"
+
+# Démarrer une tâche sur un inventaire -> renvoie le premier formulaire
 curl "http://localhost:9092/execute/start?inventory_id=INV001&email=user@example.com"
-curl -X POST "http://localhost:9092/execute/next?task_id=abc123&email=user@example.com" \
+
+# Soumettre les données du formulaire courant -> renvoie le suivant
+curl -X POST "http://localhost:9092/execute/next?task_id=abc123taskDocId&email=user@example.com" \
   -H 'Content-Type: application/json' \
   -d '{"lastname1": "Dupont", "Taille1": "170"}'
-curl "http://localhost:9092/execute/tasks?email=user@example.com"
-curl "http://localhost:9092/execute/status?task_id=abc123"
 ```
 
 ---
 
-## 8. Configuration
+## 4. Documentation des endpoints
 
-Les valeurs par défaut conviennent à un démarrage local immédiat. Vous pouvez les surcharger via un fichier `.env` copié depuis `.env.example`, ou via les variables d'environnement de votre machine.
+La description exhaustive de chaque endpoint (méthode, paramètres, exemples, codes de réponse) est générée automatiquement et consultable dans **Swagger** après le démarrage :
 
-| Variable | Défaut | Rôle |
+```
+http://localhost:9092/swagger-ui.html
+```
+
+Pour vous repérer, voici l'organisation des endpoints par famille.
+
+### Workflows — `/workflows`
+
+| Méthode | Endpoint | Rôle |
 |---|---|---|
-| `MYSQL_ROOT_PASSWORD` | `rootpassword` | Mot de passe MySQL du backend |
-| `MYSQL_DATABASE` | `olga` | Nom de la base MySQL |
-| `ORCHESTRATOR_PORT` | `9092` | Port exposé de l'Orchestrator |
-| `BACKEND_IMAGE` | `ghcr.io/nexus-ai-innovation-lab/olga-backend:1.0.0` | Image Docker du backend à tirer |
+| GET | `/workflows` | Lister les workflows (métadonnées) |
+| GET | `/workflows/{workflowId}` | Charger un workflow complet (nœuds + arêtes) |
+| PUT | `/workflows/{workflowId}` | Sauvegarder un workflow (le champ `workflow` est obligatoire) |
+| GET | `/workflows/{workflowId}/versions` | Lister l'historique des versions |
+| POST | `/workflows/{workflowId}/versions/{versionId}/restore` | Restaurer une version précédente |
 
-L'Orchestrator gère aussi `SERVER_PORT` et `OLGA_BACKEND_BASE_URL` ; le backend gère les variables internes (`ADDRESS`, `PORT`, `MYSQL_*`, `FIREBASE_KEY_PATH`). En Docker, ces valeurs sont déjà câblées dans le `compose.yaml` — rien à configurer pour un usage normal.
+### Formulaires — `/forms`
+
+| Méthode | Endpoint | Rôle |
+|---|---|---|
+| GET | `/forms` | Lister les formulaires (id, label, groupes) |
+| GET | `/forms/{formId}` | Charger le détail complet d'un formulaire |
+| POST | `/forms/save` | Créer un formulaire |
+| POST | `/forms/update/{formId}` | Mettre à jour un formulaire existant |
+| DELETE | `/forms/{formId}` | Supprimer un formulaire |
+
+### Exécution — `/execute`
+
+| Méthode | Endpoint | Rôle |
+|---|---|---|
+| GET | `/execute/inventories?email=` | Inventaires accessibles à l'utilisateur (info `canStart`) |
+| GET | `/execute/start?inventory_id=&email=` | Démarrer une tâche, renvoie le premier formulaire |
+| POST | `/execute/next?task_id=&email=` | Soumettre le formulaire courant, recevoir le suivant |
+| GET | `/execute/status?task_id=` | État d'une tâche (reprise sans modification) |
+| GET | `/execute/tasks?email=` | Tâches démarrées par un utilisateur |
+
+> Tous les chemins et noms de paramètres ci-dessus correspondent **exactement** au Swagger généré (ex. `inventory_id`, `email`, `task_id`, `workflowId`, `formId`). En cas de doute sur le format d'un champ, ouvrez Swagger.
 
 ---
 
-## 9. Problèmes courants
+## 5. Configuration et dépannage
+
+### 5.1 Configuration
+
+Les valeurs par défaut permettent un démarrage immédiat. Vous pouvez les ajuster dans un fichier `.env`, copié depuis `.env.example` :
+
+| Variable | Défaut | Rôle |
+|---|---|---|
+| `MYSQL_ROOT_PASSWORD` | `rootpassword` | Mot de passe MySQL réservé au backend |
+| `MYSQL_DATABASE` | `olga` | Nom de la base de données |
+| `ORCHESTRATOR_PORT` | `9092` | Port d'exposition de l'API sur votre machine |
+| `BACKEND_IMAGE` | `ghcr.io/nexus-ai-innovation-lab/olga-backend:1.0.0` | Image Docker du backend à télécharger |
+
+### 5.2 Dépannage
 
 **Le backend ne devient jamais `healthy`.**
-Vérifiez d'abord que `firebase/apiKey.json` existe et est valide (section 4). Consultez ensuite les journaux :
+C'est presque toujours la clé Firebase. Vérifiez que `firebase/apiKey.json` existe et est valide (section 2.2), puis consultez les journaux :
 
 ```bash
 docker compose logs -f backend
 ```
 
-**L'Orchestrator répond `502 Bad Gateway`.**
-Le backend a renvoyé une erreur (ou est injoignable). Regardez `docker compose ps` et les journaux du backend.
+**L'API répond `502 Bad Gateway`.**
+Le backend a renvoyé une erreur ou est injoignable. Regardez l'état des services et les journaux :
 
-**Le port 9092 est déjà pris.**
+```bash
+docker compose ps
+docker compose logs -f backend
+```
+
+**Le port 9092 est déjà occupé.**
 ```bash
 ORCHESTRATOR_PORT=9192 docker compose up -d
 ```
 
-**Erreur de pull de l'image backend (`manifest unknown` ou `denied`).**
-Vous devez être authentifié auprès de GHCR pour télécharger l'image :
+**Impossible de télécharger l'image du backend (`denied` ou `manifest unknown`).**
+L'image est hébergée sur GitHub Container Registry (GHCR). Si elle est privée, authentifiez-vous :
+
 ```bash
 echo "<TOKEN>" | docker login ghcr.io -u <votre-username> --password-stdin
 ```
-Le token (classic PAT avec `read:packages`) vous est fourni par votre équipe. Rappel : ne partagez jamais ce token dans le code ni dans Git.
 
-**Réinitialiser les données MySQL.**
+Le token (avec le droit `read:packages`) est fourni par votre équipe. Ne le partagez jamais dans le code ni dans Git.
+
+**Réinitialiser la base de données.**
 ```bash
 docker compose down -v
 ```
-⚠️ `-v` supprime aussi le volume `olga_data` : les données MySQL locales sont effacées.
+⚠️ `-v` supprime aussi le volume de données : les données locales sont effacées.
 
 **Arrêter l'ensemble.**
 ```bash
 docker compose down
 ```
 
-**Mettre à jour l'image du backend.**
-Si votre équipe publie une nouvelle version de l'image, indiquez son tag (ex. `BACKEND_IMAGE=ghcr.io/nexus-ai-innovation-lab/olga-backend:1.1.0 docker compose up -d`) ou forcez le retirage :
-```bash
-docker compose pull backend
-```
-
 ---
 
-## 10. Pour les mainteneurs : publier l'image du backend
+## 6. Pour les mainteneurs
 
-Le backend est une **image privée** construite depuis un dépôt séparé (non publié aux développeurs). Pour publier une nouvelle version, depuis le dépôt du backend (celui qui contient le code source) :
+Cette section ne concerne que les personnes chargées de publier une nouvelle version de l'image backend. Les utilisateurs de l'API n'en ont pas besoin.
+
+Le backend est distribué uniquement sous forme d'image Docker (jamais en code source). La clé Firebase n'est **pas** incluse dans l'image : elle est montée au runtime, ce qui autorise une distribution sûre. Pour publier une nouvelle version, depuis le dépôt qui contient le code source du backend :
 
 ```bash
-docker build -f Dockerfile.olga -t ghcr.io/nexus-ai-innovation-lab/olga-backend:1.0.0 .
-docker push ghcr.io/nexus-ai-innovation-lab/olga-backend:1.0.0
+docker build -f Dockerfile.olga -t ghcr.io/nexus-ai-innovation-lab/olga-backend:<tag> .
+docker push ghcr.io/nexus-ai-innovation-lab/olga-backend:<tag>
 ```
 
-L'image ne contient **aucune donnée sensible** (la clé Firebase est fournie au runtime), ce qui permet de la distribuer en toute sécurité. Tant que le tag utilisé par `compose.yaml` (voir `BACKEND_IMAGE`) n'est pas modifié, les développeurs continuent d'obtenir une version **reproductible** : évitez de référencer `latest`.
+Ensuite, référencez le nouveau tag dans le `compose.yaml` (variable `BACKEND_IMAGE`) pour que les développeurs obtiennent la nouvelle version de façon reproductible. Utilisez un tag de version explicite plutôt que `latest`.
